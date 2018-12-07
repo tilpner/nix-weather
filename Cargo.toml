@@ -6,6 +6,14 @@ edition = "2018"
 
 [dependencies]
 nom = "4.1.1"
+futures = "0.1.25"
+tokio = "0.1.13"
+reqwest = "0.9.5"
+
+number_prefix = "0.2.8"
+
+[profile.dev]
+opt-level = 1
 
 [profile.release]
 lto = true

@@ -1,0 +1,10 @@
+StorePath: /nix/store/npbs65gdg4nqy4hq5gfckqclmnj09lvg-blender-2.79b
+URL: nar/0gqajbajr2c95m40xv4n3bqh0zj5f9xkgjl9ra5ggj638a32ii0k.nar.xz
+Compression: xz
+FileHash: sha256:0gqajbajr2c95m40xv4n3bqh0zj5f9xkgjl9ra5ggj638a32ii0k
+FileSize: 43190396
+NarHash: sha256:0m5v7lna45nh3wmfdyq68yqxbyxvr2442bkiyd4arblv66bb78dr
+NarSize: 197054976
+References: 1ij345s3m3jj7s1bfv61kny1dhm9r9s1-glew-2.1.0 29994qlqdyzg5xyfb27n02ih5m1kh5sz-libpng-apng-1.6.35 3443ig4488vigmf7c1d5zgibs4wa4ypb-libGL-1.0.0 38rjx2cddpsvxkzkxxn6v9s391s737bm-libxml2-2.9.8 3h1j9hq80ws7sb0n9pp7blzbq9h6g0n5-jemalloc-5.1.0 3pn9w2h6z1k2i2jahala98czcdw0w8l2-gcc-6.5.0-lib 442d2icagfmrmcs6ndpj4m2ld92qxkgf-glu-9.0.0 68h733z86y65pal1jga1d2qvi5vj4knx-openjpeg-1.5.2 6gb87nbyjhsmds7qsyq1c2a8079lbl46-libXfixes-5.0.3 73yvk9m68xmc9wz4waivvvjxinzplf5h-opencolorio-1.1.0 8hdvd39w1k10mvd0cygiai1q0wjdv7zb-openexr-2.3.0 9mmfi15a872cgq9m4z1agma0chs7lldk-pcre-8.42 fl4bs89mbp12jg00m4mfnwx9j2gc571z-libXi-1.7.9 fwfjb9pr9zk07wdq3xa5227my2gjdz0x-ffmpeg-3.4.4 g6gyndszrlr9abv0zicfa6rq68nd2yyz-freetype-2.9 g8bqvwlkz74kxag3dbar6p2xsn0sm4xw-openal-soft-1.19.1 i84c8djhn316cbm8dx9lxgzgr26zhlsv-libjpeg-turbo-1.5.3 idq4dzxj0ylmh16vm3hyv25s2dz1w6kc-zlib-1.2.11 jh8a59wabs3fq0pfzir3fzlwjvbgznx0-ilmbase-2.3.0 krrh5ymca2za1y6x9qjvjw15460w1gw7-libtiff-4.0.10 mrfcv8ipiksfdrx3xq7dvcrzgg2jdfsw-glibc-2.27 nbql97szal3zsarskw7wfaadvqil5672-libsndfile-1.0.28 qx92q8rl6pghj7qw20m5bd6617p05azl-openimageio-1.8.16 rvdvyqsza6cxaqdhvl8ybxv671hvg7l2-opensubdiv-3.3.3 spvf6zjnc0rvv4w356x10l23qi1mswak-fftw-double-3.3.8 vgmcjrjl7sn2grk5vdh6hfni0nqni0q0-ocl-icd-2.2.10 w5py5h8dcydjy1c0xd464kz8rlb6wysv-python3-3.5.6 wpw46kw4k4zk4rpvgbinv3rsy8ck28f2-boost-1.67_0 ymfbmm2an13wc27aq7bnm109si6h95in-libXrender-0.9.10 zdrapj59vk5wnm1fw6v0cj544pa9n5g5-libX11-1.6.6
+Deriver: za2qcfmlqg4yxp18cw9i1dh6b5acsig2-blender-2.79b.drv
+Sig: cache.nixos.org-1:YpwhknXItLIcSkAdOFuYqhp31+GBPxugyA+wC2ZU5p+/vR2ZTAclpOtIjJGR0ywdXCRovmlSRglyY7PHGvokCg==

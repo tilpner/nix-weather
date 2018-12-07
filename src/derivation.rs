@@ -176,13 +176,13 @@ fn parse_input_drv() {
 
 #[test]
 fn parse_derivation() {
-    let drv_hello = drv(include_bytes!("../drvs/hello.drv")); 
+    let drv_hello = drv(include_bytes!("../assets/hello.drv"));
     assert!(drv_hello.is_ok());
 
-    let drv_blender = drv(include_bytes!("../drvs/blender.drv")); 
+    let drv_blender = drv(include_bytes!("../assets/blender.drv"));
     assert!(drv_blender.is_ok());
 
-    let drv_xz = drv(include_bytes!("../drvs/xz.tar.bz2.drv")); 
+    let drv_xz = drv(include_bytes!("../assets/xz.tar.bz2.drv"));
     println!("{:?}", drv_xz);
     assert!(drv_xz.is_ok());
 }

@@ -1,0 +1,10 @@
+StorePath: /nix/store/s4vdsv44p998yw22a2fmargh6bvcs6cz-dejagnu-1.6.1.tar.gz
+URL: nar/0iy5jr9m8k6zk8sc5vvm95ip4ss3ka48r6zv39xvfc2pq6yknb03.nar.xz
+Compression: xz
+FileHash: sha256:0iy5jr9m8k6zk8sc5vvm95ip4ss3ka48r6zv39xvfc2pq6yknb03
+FileSize: 526212
+NarHash: sha256:05x4098vin5klbk9fjfarrj2727kp4il3cmp21w8z3m097jlcjh8
+NarSize: 526128
+References: 
+Deriver: 9byf96p4myh5pdlj8sg6bp16w4gbsxxy-dejagnu-1.6.1.tar.gz.drv
+Sig: cache.nixos.org-1:s75z4tgNh9fAqEl0EKc8zWMgZSYjtZNFDsuShs8d57n+my+HYy7CcVJOGPYXvHT0gCpEyaHFremVOdwXVCptBw==
