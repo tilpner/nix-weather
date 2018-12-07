@@ -115,7 +115,7 @@ fn main() {
     let build_time_closure = gather_closure(args[1].clone(), &read_drv(&args[1]));
     // println!("done({}), gathered {} paths", args[1], closure.len());
 
-    let narinfos = fetch_narinfo(closure);
+    let narinfos = fetch_narinfo(build_time_closure);
 
     print_statistics(narinfos);
 
