@@ -1,4 +1,3 @@
-use reqwest::r#async::Chunk;
 use nom::*;
 
 #[derive(Debug, Clone)]
@@ -48,9 +47,9 @@ named!(narinfo<NarInfo>,
 );
 
 impl NarInfo {
-    pub fn from(body: Chunk) -> Option<Self> {
+    pub fn from(body: &[u8]) -> Option<Self> {
         if &body[..] == b"404" { return None }
-        narinfo(&body).ok().map(|(_rest, info)| info)
+        narinfo(body).ok().map(|(_rest, info)| info)
     }
 }
 
