@@ -1,4 +1,25 @@
-use nom::*;
+use std::{ fs, path::Path };
+
+use nom::{
+    IResult,
+    sequence::{
+        delimited, preceded,
+        separated_pair,
+        tuple
+    },
+    combinator::{ map, value },
+    branch::alt,
+    multi::separated_list,
+    bytes::streaming::{
+        escaped_transform,
+        is_not,
+        tag
+    },
+    character::complete::char
+};
+use log::trace;
+
+use crate::{ StoreHash, StoreItem, StoreCache };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drv {
@@ -9,6 +30,28 @@ pub struct Drv {
     pub builder: String,
     pub builder_args: Vec<String>,
     pub env: Vec<(String, String)>
+}
+
+impl Drv {
+    pub fn read_from<P: AsRef<Path>>(path: P) -> Self {
+        trace!("reading derivation {}", path.as_ref().display());
+        let file_content = fs::read(path).expect("Unable to read derivation");
+        let (rest, drv) = drv(&file_content).expect("Unable to parse derivation");
+        assert!(rest.is_empty(), "Less than the entire drv was parsed");
+        drv
+    }
+
+    pub fn find_name(&self) -> String {
+        self.env.iter()
+            .find(|(k, _)| k == "name")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| String::from("unknown"))
+    }
+
+    pub fn find_output(&self, key: &str) -> Option<&DrvOutput> {
+        self.outputs.iter()
+            .find(|output| output.key == key)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,110 +68,97 @@ pub struct InputDrv {
     pub outputs: Vec<String>
 }
 
-named!(
-    string<String>,
-    delimited!(
-        char!('"'),
-        map!(
-            escaped_transform!(is_not!("\\\""), '\\', alt!(
-                char!('\\') => { |_| &b"\\"[..] }
-              | char!('"')  => { |_| &b"\""[..] }
-              | char!('n')  => { |_| &b"\n"[..] }
-              | char!('t')  => { |_| &b"\t"[..] }
-            )),
+impl InputDrv {
+    // TODO: don't lifetime *everything*?
+    pub fn resolve<'a>(&'a self, drvs: &'a StoreCache) -> impl Iterator<Item = &'a str> + 'a {
+        let hash = StoreHash::from_path(&self.path);
+        if let Some(StoreItem::Drv(drv)) = drvs.get(&hash) {
+            self.outputs.iter()
+                .flat_map(move |output| drv.find_output(output))
+                .map(|output| &output.path[..])
+        } else { panic!() }
+    }
+}
+
+fn string(i: &[u8]) -> IResult<&[u8], String> {
+    delimited(
+        char('"'),
+        map(
+            escaped_transform(is_not("\\\""), '\\', alt((
+              value(&b"\\"[..], char('\\')),
+              value(&b"\""[..], char('"')),
+              value(&b"\n"[..], char('n')),
+              value(&b"\t"[..], char('t'))
+            ))),
             |bytes| String::from_utf8_lossy(&bytes).into_owned()
         ),
-        char!('"')
-    )
-);
+        char('"')
+    )(i)
+}
 
-macro_rules! tuple_of {
-    ($i:expr, $( $name:ident : $parser:ident ),* ) => {
-        do_parse!($i,
-            char!('(') >>
-            $(
-                $name : $parser >> opt!(comma) >>
-            )*
-            char!(')') >>
-            ( $( $name ),* )
-        )
+fn pair<A, OA, B, OB>(a: A, b: B) -> impl Fn(&[u8]) -> IResult<&[u8], (OA, OB)>
+where A: Fn(&[u8]) -> IResult<&[u8], OA> + Copy,
+      B: Fn(&[u8]) -> IResult<&[u8], OB> + Copy {
+    in_parens(
+        move |i| separated_pair(a, char(','), b)(i)
+    )
+}
+
+fn list_of<P, O>(p: P) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<O>>
+where P: Fn(&[u8]) -> IResult<&[u8], O> + Copy {
+    move |i| {
+        delimited(
+            char('['),
+            separated_list(char(','), p),
+            char(']')
+        )(i)
     }
 }
 
-macro_rules! struct_of {
-    ($i:expr, $st_name:ident { $( $name:ident : $parser:ident ),* } ) => {
-        do_parse!($i,
-            char!('(') >>
-            $(
-                $name : $parser >> opt!(comma) >>
-            )*
-            char!(')') >>
-            ( $st_name { $( $name ),* } )
-        )
-    }
+fn comma(i: &[u8]) -> IResult<&[u8], char> { char(',')(i) }
+
+fn in_parens<P, OP>(p: P) -> impl Fn(&[u8]) -> IResult<&[u8], OP>
+where P: Fn(&[u8]) -> IResult<&[u8], OP> + Copy {
+    move |i| delimited(char('('), p, char(')'))(i)
 }
 
-macro_rules! list_of {
-    ($i:expr, $element:ident) => {
-        delimited!($i,
-            char!('['),
-            separated_list_complete!(
-                char!(','),
-                $element
-            ),
-            char!(']')
-        )
-    }
+fn drv_output(i: &[u8]) -> IResult<&[u8], DrvOutput> {
+    in_parens(
+        move |i| {
+            let (i, (key, _, path, _, hash_algo, _, hash)) =
+                tuple((string, comma, string, comma, string, comma, string))(i)?;
+            Ok((i, DrvOutput { key, path, hash_algo, hash }))
+        },
+    )(i)
 }
 
-named!(drv_output<DrvOutput>,
-    struct_of!(
-        DrvOutput {
-            key: string,
-            path: string,
-            hash_algo: string,
-            hash: string
-        }
-    )
-);
+fn input_drv(i: &[u8]) -> IResult<&[u8], InputDrv> {
+    in_parens(
+        move |i| {
+            let (i, (path, _, outputs)) =
+                tuple((string, comma, list_of(string)))(i)?;
+            Ok((i, InputDrv { path, outputs }))
+        },
+    )(i)
+}
 
-named!(input_drv<InputDrv>,
-    struct_of!(
-        InputDrv {
-            path: string,
-            outputs: string_list
-        }
-    )
-);
-
-named!(comma<char>, char!(','));
-
-// Why define lists here?
-// 1. My macros only accepts idents, not submacros
-// 2. It might help reduce overall code size
-named!(string_list<Vec<String> >, list_of!(string));
-named!(drv_output_list<Vec<DrvOutput> >, list_of!(drv_output));
-named!(input_drv_list<Vec<InputDrv> >, list_of!(input_drv));
-named!(tuple_string_string<(String, String)>, tuple_of!(a: string, b: string));
-named!(tuple_string_string_list<Vec<(String, String)> >, list_of!(tuple_string_string));
-
-named!(pub drv<Drv>,
-    preceded!(
-        tag!("Derive"),
-        struct_of!(
-            Drv {
-                outputs: drv_output_list,
-                input_drvs: input_drv_list,
-                input_srcs: string_list,
-                platform: string,
-                builder: string,
-                builder_args: string_list,
-                env: tuple_string_string_list
-            }
-        )
-    )
-);
-
+fn drv(i: &[u8]) -> IResult<&[u8], Drv> {
+    fn pair_string_string(i: &[u8]) -> IResult<&[u8], (String, String)> {
+        pair(string, string)(i)
+    }
+    preceded(
+        tag("Derive"),
+        in_parens(move |i| {
+            let (i, (outputs, _, input_drvs, _,
+                     input_srcs, _, platform, _,
+                     builder, _, builder_args, _, env)) =
+                tuple((list_of(drv_output), comma, list_of(input_drv), comma,
+                       list_of(string), comma, string, comma,
+                       string, comma, list_of(string), comma, list_of(pair_string_string)))(i)?;
+            Ok((i, Drv { outputs, input_drvs, input_srcs, platform, builder, builder_args, env }))
+        })
+    )(i)
+}
 
 #[test]
 fn parse_string() {
@@ -143,14 +173,14 @@ fn parse_string() {
 
 #[test]
 fn parse_pair() {
-    named!(pair<(String, String)>, tuple_of!(foo: string, bar: string));
-    assert_eq!(pair(b"(\"foo\",\"bar\")"), Ok((&b""[..],
+    let tuple_string_string = pair(string, string);
+    assert_eq!(tuple_string_string(b"(\"foo\",\"bar\")"), Ok((&b""[..],
                (String::from("foo"), String::from("bar")))));
 }
 
 #[test]
 fn parse_list_of() {
-    named!(string_list<Vec<String> >, list_of!(string));
+    let string_list = list_of(string);
     assert_eq!(string_list(b"[\"foo\"]"), Ok((&b""[..], vec![String::from("foo")])));
 }
 
@@ -177,6 +207,7 @@ fn parse_input_drv() {
 #[test]
 fn parse_derivation() {
     let drv_hello = drv(include_bytes!("../assets/hello.drv"));
+    println!("{:?}", drv_hello);
     assert!(drv_hello.is_ok());
 
     let drv_blender = drv(include_bytes!("../assets/blender.drv"));

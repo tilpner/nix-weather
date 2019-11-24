@@ -1,147 +1,119 @@
-pub mod derivation;
-pub mod narinfo;
+use std::{ cmp, io, path::PathBuf };
 
-use std::{
-    env, fs, str, mem,
-    path::Path,
-    collections::HashMap
+use structopt::StructOpt;
+use log::*;
+use url::Url;
+use number_prefix::{ NumberPrefix, Standalone, Prefixed };
+
+use nix_weather::{
+    StoreHash, StoreCache,
+    Closure,
+    CoverageStatistics,
+    derivation::*
 };
 
-use futures::{ stream, Future, Stream };
-use tokio::runtime::Runtime;
-use reqwest::r#async::Client;
+#[derive(StructOpt, Debug)]
+struct Opt {
+    /// Which derivation to collect coverage statistics for (must reside in store)
+    #[structopt(name = "drv", parse(from_os_str))]
+    input_derivations: Vec<PathBuf>,
 
-use number_prefix::{ binary_prefix, Standalone, Prefixed };
+    /// Which HTTP(s) binary caches to query, tried in order of appearance
+    #[structopt(name = "cache", short, long, default_value = "https://cache.nixos.org")]
+    cache_roots: Vec<Url>,
 
-use crate::{ derivation::*, narinfo::* };
+    /// How many .narinfo files to fetch concurrently
+    #[structopt(short, long, default_value = "32")]
+    narinfo_concurrency: u32,
 
-const NIX_HASH_LENGTH: usize = 32;
+    /// How often to try to fetch a .narinfo file
+    #[structopt(short = "m", long, default_value = "3")]
+    narinfo_max_attempts: u32,
 
-fn read_drv<P: AsRef<Path>>(path: P) -> Drv {
-    let file_content = fs::read(path).expect("Unable to read derivation");
-    let (rest, drv) = derivation::drv(&file_content).expect("Unable to parse derivation");
-    assert!(rest.is_empty(), "Less than the entire drv was parsed");
-    drv
-}
+    /// Output statistics in JSON
+    #[structopt(long)]
+    json: bool,
 
-fn gather_closure(hash: StoreHash, drv: &Drv) -> HashMap<StoreHash, Drv> {
-    fn add_to_closure(out: &mut HashMap<StoreHash, Drv>, hash: StoreHash, drv: &Drv) {
-        if out.contains_key(&hash) { return; }
-        out.insert(hash, drv.clone());
-
-        for InputDrv { path, .. } in &drv.input_drvs {
-            // check cache to avoid unnecessary IO/parsing
-            let input_drv_hash = StoreHash::from_path(path);
-            let input_drv = if out.contains_key(&input_drv_hash) {
-                out[&input_drv_hash].clone()
-            } else {
-                read_drv(&path)
-            };
-
-            add_to_closure(out, input_drv_hash, &input_drv);
-        }
-    }
-
-    let mut closure = HashMap::new();
-    add_to_closure(&mut closure, hash, &drv);
-    closure
-}
-
-// Nix store hashes are the first 160 bits of a sha256 hash, base32 encoded.
-// That base32 representation could be decoded into a [u32; 5], but then
-// we'd depend on Nix's exact character set and encoding/decoding rules.
-//
-// sizeof [u8; 32] = 256 bit > 160 bit = sizeof [u32; 5]
-//
-// This means our representation is quite a bit less compact than it could be,
-// but with a typical system closure of 10k paths, that's still less than a megabyte,
-// the derivations themselves are much more expensive.
-#[derive(Hash, Clone, PartialEq, Eq)]
-struct StoreHash([u8; NIX_HASH_LENGTH]);
-impl StoreHash {
-    fn from_path<P: AsRef<Path>>(path: P) -> Self {
-        let hash = &path.as_ref()
-            .file_name().expect("Not a file")
-            .to_str().expect("Invalid characters in filename")
-            .as_bytes()[..NIX_HASH_LENGTH];
-
-        let mut arr: [u8; NIX_HASH_LENGTH] = unsafe { mem::uninitialized() };
-        arr.copy_from_slice(hash);
-
-        StoreHash(arr)
-    }
-
-    fn to_str(&self) -> &str {
-        // no need to check for utf8-ness, content can only be created by from_path
-        unsafe { str::from_utf8_unchecked(&self.0) }
-    }
-}
-
-fn fetch_narinfo<I>(outputs: I) -> Vec<Option<NarInfo>>
-    // Runtime::block_on needs Send + 'static
-    where I: Iterator<Item = StoreHash> + Send + 'static
-{
-    let client = Client::new();
-    let narinfos = stream::iter_ok(outputs)
-        .map(move |output| {
-            let url = format!("http://cache.nixos.org/{}.narinfo", output.to_str());
-            client.get(&url)
-                  .send()
-                  .and_then(|res| res.into_body().concat2().from_err())
-        })
-        .buffer_unordered(128)
-        .map(|bytes| {
-            let b: &[u8] = bytes.as_ref();
-            NarInfo::from(b)
-        })
-        .collect();
-
-    let mut runtime = Runtime::new().expect("Unable to initialise tokio runtime");
-    runtime.block_on(narinfos).unwrap_or_default()
+    #[structopt(short, long, parse(from_occurrences))]
+    verbose: i32,
+    #[structopt(short, long, parse(from_occurrences))]
+    quiet: i32
 }
 
 fn format_bytes(amount: u64) -> String {
-    match binary_prefix(amount as f64) {
+    match NumberPrefix::binary(amount as f64) {
         Standalone(bytes) =>   format!("{} bytes", bytes),
         Prefixed(prefix, n) => format!("{:.2} {}B", n, prefix)
     }
 }
 
-fn print_statistics(narinfos: Vec<Option<NarInfo>>) {
-    println!("Fetched {} .narinfos", narinfos.len());
+fn print_statistics(stats: CoverageStatistics) {
+    println!("Fetched {} .narinfos", stats.total);
+    println!("{}/{} ({:.2}%) outputs are available",
+             stats.found, stats.total,
+             100. * stats.found as f32 / stats.total as f32);
 
-    let total = narinfos.len();
-    let mut found = 0;
-    let mut file_size = 0;
-    let mut nar_size = 0;
-    for narinfo in narinfos {
-        if let Some(narinfo) = narinfo {
-            found += 1;
-            file_size += narinfo.file_size;
-            nar_size += narinfo.nar_size;
+    println!("{} of Nix archives (compressed)", format_bytes(stats.file_size));
+    println!("{} of Nix archives (uncompressed)", format_bytes(stats.nar_size));
+
+    let max_length = stats.missing.iter().map(String::len).max().unwrap_or(0);
+    if !stats.missing.is_empty() {
+        println!("The following derivations are missing and will have to be built locally:");
+        for names in stats.missing.chunks(3) {
+            for name in names { print!("{: <width$} ", name, width = max_length + 1); }
+            println!();
         }
     }
-
-    println!("{}/{} ({:.2}%) outputs are available",
-             found, total,
-             100. * found as f32 / total as f32);
-
-    println!("{} of Nix archives (compressed)", format_bytes(file_size));
-    println!("{} of Nix archives (uncompressed)", format_bytes(nar_size));
 }
 
-fn main() {
-    let args: Vec<_> = env::args().collect();
+#[tokio::main]
+async fn main() {
+    let opt = Opt::from_args();
 
-    let input_path = fs::canonicalize(&args[1]).expect("Unable to canonicalize path argument");
-    let input_hash = StoreHash::from_path(&input_path);
-    let build_time_closure = gather_closure(input_hash, &read_drv(&input_path));
-    println!("done({}), gathered {} paths", args[1], build_time_closure.len());
+    // Start at INFO, allow to reduce to warn/error or increase to debug/trace
+    let verbosity = cmp::max(0, 2 + opt.verbose - opt.quiet);
+    stderrlog::new()
+        .module(module_path!())
+        .verbosity(verbosity as usize)
+        .init().expect("Unable to init logging");
 
-    let build_time_outputs = build_time_closure.into_iter()
-        .flat_map(|(_hash, drv)| drv.outputs)
-        .map(|output| StoreHash::from_path(&output.path));
-    let narinfos = fetch_narinfo(build_time_outputs);
+    // Resolve symlinks, useful for ./result outputs
+    let input_paths = opt.input_derivations.into_iter()
+        .map(|path| path.canonicalize().expect("Unable to canonicalize input path"));
 
-    print_statistics(narinfos);
+    let inputs = input_paths.map(|path| (StoreHash::from_path(&path), Drv::read_from(path)));
+
+    let outputs: Vec<_> = 
+        inputs.flat_map(|(input_hash, input_drv)|
+            input_drv.outputs.clone().into_iter()
+                .map(move |out| (input_hash, input_drv.clone(), StoreHash::from_path(&out.path))))
+        .collect();
+
+    let mut store = StoreCache::default();
+    for (input_hash, input_drv, _output_hash) in outputs.iter() {
+        store.discover_build_time_closure(*input_hash, &input_drv);
+    }
+
+    info!("discovered {} store items...", store.entries().len());
+
+    debug!("using cache_roots: {:?}", &opt.cache_roots);
+    let fetched = store.fetch_narinfo(&opt.cache_roots, opt.narinfo_max_attempts, opt.narinfo_concurrency).await;
+
+    info!("fetched {} narinfo...", fetched);
+
+    info!("building runtime closure...");
+    let mut runtime_closure = Closure::empty();
+    for (_input_hash, _input_drv, output_hash) in &outputs {
+        runtime_closure.add_runtime_closure_of(*output_hash, &store);
+    }
+    info!("runtime closure is at most {} paths large", runtime_closure.entries().len());
+
+    let stats = runtime_closure.coverage_statistics(&store);
+
+    if opt.json {
+        serde_json::to_writer(&mut io::stdout().lock(), &stats)
+            .expect("Failed to write statistics");
+    } else {
+        print_statistics(stats);
+    }
 }
