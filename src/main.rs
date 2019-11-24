@@ -1,4 +1,4 @@
-use std::{ cmp, io, path::PathBuf };
+use std::{ cmp, io, path::PathBuf, process };
 
 use structopt::StructOpt;
 use log::*;
@@ -34,6 +34,10 @@ struct Opt {
     #[structopt(long)]
     json: bool,
 
+    /// Output coverage percentage as exit code
+    #[structopt(long, short)]
+    percentage_as_exit: bool,
+
     #[structopt(short, long, parse(from_occurrences))]
     verbose: i32,
     #[structopt(short, long, parse(from_occurrences))]
@@ -47,7 +51,7 @@ fn format_bytes(amount: u64) -> String {
     }
 }
 
-fn print_statistics(stats: CoverageStatistics) {
+fn print_statistics(stats: &CoverageStatistics) {
     println!("Fetched {} .narinfos", stats.total);
     println!("{}/{} ({:.2}%) outputs are available",
              stats.found, stats.total,
@@ -114,6 +118,11 @@ async fn main() {
         serde_json::to_writer(&mut io::stdout().lock(), &stats)
             .expect("Failed to write statistics");
     } else {
-        print_statistics(stats);
+        print_statistics(&stats);
+    }
+
+    if opt.percentage_as_exit {
+        let percentage = 100. * stats.found as f32 / stats.total as f32;
+        process::exit(percentage as i32);
     }
 }
