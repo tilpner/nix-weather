@@ -24,3 +24,9 @@ OPTIONS:
 ARGS:
     <drv>...    Which derivation to collect coverage statistics for (must reside in store)
 ```
+
+## Limitations
+
+- Doesn't have a NarInfo cache
+- Doesn't use local information of already-fetched/-built outputs
+- Might use subtly (or worse) different algorithm than actual Nix
