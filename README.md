@@ -1,4 +1,9 @@
-# Usage
+# nix-weather
+
+[![github actions badge](https://github.com/tilpner/nix-weather/workflows/CI/badge.svg)](https://github.com/tilpner/nix-weather/actions)
+
+
+## Usage
 
 ```
 nix-weather 0.1.0
